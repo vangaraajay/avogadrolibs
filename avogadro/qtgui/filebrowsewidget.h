@@ -8,8 +8,11 @@
 
 #include "avogadroqtguiexport.h"
 
+#include <QtGui/QFont>
+#include <QtGui/QPalette>
 #include <QtWidgets/QWidget>
 
+class QAction;
 class QFileSystemModel;
 class QLineEdit;
 class QPushButton;
@@ -77,6 +80,9 @@ private:
   QFileSystemModel* m_fileSystemModel;
   QPushButton* m_button;
   QLineEdit* m_edit;
+  QAction* m_errorAction;
+  QFont m_normalFont;
+  QPalette m_normalPalette;
 };
 
 } // namespace QtGui

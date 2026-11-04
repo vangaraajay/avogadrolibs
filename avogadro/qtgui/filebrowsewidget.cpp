@@ -5,6 +5,11 @@
 
 #include "filebrowsewidget.h"
 
+#include <algorithm>
+#include <cmath>
+
+#include <QtGui/QAction>
+#include <QtGui/QColor>
 #include <QFileSystemModel>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QCompleter>
@@ -12,16 +17,61 @@
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLineEdit>
 #include <QtWidgets/QPushButton>
+#include <QtWidgets/QStyle>
 
 #include <QFileInfo>
 #include <QProcessEnvironment>
 
 namespace Avogadro::QtGui {
+namespace {
+
+double relativeLuminance(const QColor& color)
+{
+  auto linearize = [](double channel) {
+    return channel <= 0.04045 ? channel / 12.92
+                              : std::pow((channel + 0.055) / 1.055, 2.4);
+  };
+
+  return 0.2126 * linearize(color.redF()) +
+         0.7152 * linearize(color.greenF()) +
+         0.0722 * linearize(color.blueF());
+}
+
+double contrastRatio(const QColor& foreground, const QColor& background)
+{
+  const double foregroundLuminance = relativeLuminance(foreground);
+  const double backgroundLuminance = relativeLuminance(background);
+  return (std::max(foregroundLuminance, backgroundLuminance) + 0.05) /
+         (std::min(foregroundLuminance, backgroundLuminance) + 0.05);
+}
+
+QColor errorTextColor(const QPalette& palette)
+{
+  const QColor background = palette.color(QPalette::Base);
+  const QColor darkRed(160, 0, 0);
+  const QColor lightRed(255, 179, 179);
+  const QColor preferred =
+    background.lightness() < 128 ? lightRed : darkRed;
+
+  if (contrastRatio(preferred, background) >= 4.5)
+    return preferred;
+
+  const QColor alternate =
+    background.lightness() < 128 ? darkRed : lightRed;
+  if (contrastRatio(alternate, background) >= 4.5)
+    return alternate;
+
+  return palette.color(QPalette::Text);
+}
+
+} // namespace
 
 FileBrowseWidget::FileBrowseWidget(QWidget* theParent)
   : QWidget(theParent), m_mode(), // use the setter to initialize filters.
     m_valid(false), m_fileSystemModel(new QFileSystemModel(this)),
-    m_button(new QPushButton(tr("Browse"))), m_edit(new QLineEdit)
+    m_button(new QPushButton(tr("Browse"))), m_edit(new QLineEdit),
+    m_errorAction(nullptr), m_normalFont(m_edit->font()),
+    m_normalPalette(m_edit->palette())
 {
   auto* hbox = new QHBoxLayout;
   hbox->addWidget(m_edit);
@@ -134,20 +184,35 @@ void FileBrowseWidget::testFileName()
 
 void FileBrowseWidget::fileNameMatch()
 {
-  QPalette pal;
-  // get the default window text color
-  // works for both dark theme and light theme
-  QColor text = qApp->palette().color(QPalette::WindowText);
-  pal.setColor(QPalette::Text, text);
-  m_edit->setPalette(pal);
+  m_edit->setFont(m_normalFont);
+  m_edit->setPalette(m_normalPalette);
+  if (m_errorAction) {
+    m_edit->removeAction(m_errorAction);
+    delete m_errorAction;
+    m_errorAction = nullptr;
+  }
   m_valid = true;
 }
 
 void FileBrowseWidget::fileNameNoMatch()
 {
-  QPalette pal;
-  pal.setColor(QPalette::Text, Qt::red);
+  QFont font = m_normalFont;
+  font.setUnderline(true);
+  m_edit->setFont(font);
+
+  QPalette pal = m_edit->palette();
+  pal.setColor(QPalette::Text, errorTextColor(pal));
   m_edit->setPalette(pal);
+  const QString message =
+    m_mode == ExecutableFile ? tr("Executable not found or not executable")
+                             : tr("File not found");
+  if (!m_errorAction) {
+    m_errorAction = m_edit->addAction(
+      style()->standardIcon(QStyle::SP_MessageBoxWarning),
+      QLineEdit::TrailingPosition);
+  }
+  m_errorAction->setText(message);
+  m_errorAction->setToolTip(message);
   m_valid = false;
 }
 
